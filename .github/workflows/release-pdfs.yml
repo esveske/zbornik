@@ -1,0 +1,30 @@
+name: Build and Release PDFs
+
+on:
+  push:
+    tags:
+      - "*-*.*"   # Triggers only on version tags
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout source code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build and run in custom devcontainer
+      uses: devcontainers/ci@v0.3
+      with:
+        subFolder: .devcontainer
+        runCmd: |
+          make
+
+    - name: Upload ZIP to GitHub Release
+      uses: softprops/action-gh-release@v1
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        files: output/output.zip
