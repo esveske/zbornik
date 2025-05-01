@@ -8,7 +8,7 @@ ARG USER_UID=1000
 ARG USER_GID=$USER_UID
 
 RUN groupadd --gid $USER_GID $USERNAME \
-  && useradd --uid $USER_UID --gid $USER_GID -m $USERNAME 
+  && useradd -s /usr/bin/bash --uid $USER_UID --gid $USER_GID -m $USERNAME 
 
 RUN apt-get update && \
     ln -fs /usr/share/zoneinfo/Europe/Belgrade /etc/localtime && \
@@ -27,9 +27,16 @@ RUN echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula sele
     texlive-science \
     fonts-freefont-ttf \
     ttf-mscorefonts-installer \
+    wget \
     texlive-latex-extra \
     texlive-lang-cyrillic \
+    texlive-full \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* && \
+    wget https://mirrors.ctan.org/macros/latex/contrib/algpseudocodex/algpseudocodex.sty && \
+    mkdir -p ~/texmf/tex/latex/algpseudocodex && \
+    mv algpseudocodex.sty ~/texmf/tex/latex/algpseudocodex/ && \
+    texhash ~/texmf
+
 
 CMD ["bash"]
