@@ -1,0 +1,16 @@
+{
+  "name": "Development Container",
+  "dockerFile": "Dockerfile",
+  "remoteUser": "vscode",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "James-Yu.latex-workshop",      // Most popular LaTeX extension
+        "valentjn.vscode-ltex",         // Grammar and spell checker
+        "torn4dom4n.latex-support",     // Snippets and symbols
+        // "mathpix.vscode-mathpix-snipping-tool", // Convert handwritten or PDF math to LaTeX
+        // "yzane.markdown-pdf"            // Export markdown with LaTeX to PDF
+      ]
+    }
+  }
+}
