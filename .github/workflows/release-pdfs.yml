@@ -1,6 +1,7 @@
 name: Build and Release PDFs
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - "*-*.*"   # Triggers only on version tags
