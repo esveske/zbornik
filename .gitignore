@@ -301,3 +301,7 @@ TSWLatexianTemp*
 #*Notes.bib
 
 /*/*/*/plot_*.pdf
+# generated .bib file
+*/refs.bib
+output/
+run.sh

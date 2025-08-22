@@ -40,6 +40,7 @@
 \RequirePackage[absolute,overlay]{textpos}
 
 \RequirePackage[serbian, english]{babel}
+\RequirePackage{csquotes} % Package biblatex Warning: 'babel/polyglossia' detected but 'csquotes' missing.
 
 \newcommand\captionmainlanguage{serbian}
 \RequirePackage[lang=english]{bicaption}
@@ -250,7 +251,7 @@
 \def\Part#1{\gdef\@Part{#1}}
 \gdef\@Part{\ClassError{sveska}{Part not defined}}%
 \def\Section#1{\gdef\@Section{#1}}
-\gdef\@Section{\ClassError{sveska}{Section not defined}}%
+\gdef\@Section{SECTION-TODO}%\ClassError{sveska}{Section not defined}}%
 
 \def\Title#1{\gdef\@Title{#1}}
 \def\TitleEng#1{\gdef\@TitleEng{#1}}
@@ -408,11 +409,12 @@
 \newcommand{\AuthorExHere}{
     \begin{auth@float}
         \parskip=10pt
-        % \hrulefill\\
+        % \hrulefill\
         \raggedright \textit{\@AuthorEx}
     \end{auth@float}
 }
 
+\RequirePackage[backend=biber,style=authoryear,language=serbian]{biblatex}
 \newcommand{\Source}[1]{%
 \vbox{\noindent{}#1}
 \vspace{3mm}
@@ -491,6 +493,7 @@
 \newtheorem{Proposition}{Tvrđenje}
 \newtheorem{Example}{Primer}
 \newtheorem{Lemma}{Lema}
+% \renewcommand*{\proofname}{Dokaz}
 \newenvironment{Proof}{
   \begin{proof}
 }{

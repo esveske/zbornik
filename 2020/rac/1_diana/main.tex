@@ -25,15 +25,15 @@ The first modification slowed down process loading, and the other scheduling alg
 
 \section{Uvod}
 
-U toku rada računara pokrene se više procesa, međutim, procesorsko jezgro može da izvršava samo jedan proces u datom trenutku. Iz tog razloga procesi moraju, ili u potpunosti završiti svoj rad, ili prepustiti procesor drugom procesu, kako bi korisnik imao utisak paralelnog izvršavanja procesa (Tanenbaum i Bos 2015: 86). Smenom procesa postiže se i bolja iskorišćenost procesora, pošto procesor ne mora da čeka proces dok isti izvršava neku ulazno-izlaznu operaciju (Marić 2017: 50).
+U toku rada računara pokrene se više procesa, međutim, procesorsko jezgro može da izvršava samo jedan proces u datom trenutku. Iz tog razloga procesi moraju, ili u potpunosti završiti svoj rad, ili prepustiti procesor drugom procesu, kako bi korisnik imao utisak paralelnog izvršavanja procesa \parencite[749]{tanenbaum2015}. Smenom procesa postiže se i bolja iskorišćenost procesora, pošto procesor ne mora da čeka proces dok isti izvršava neku ulazno-izlaznu operaciju \parencite[50]{maric2017}.
 
 Da bi se procesi mogli smenjivati, neophodno je zapamtiti trenutno stanje procesa u trenutku kada mu se oduzmu procesorski resursi, što se postiže uvođenjem kontrolnog bloka procesa.
 
-Kontrolni blok procesa je struktura podataka koja pored trenutnog stanja procesa sadrži i druge podatke o procesu, koji se razlikuju u različitim implementacijama operativnih sistema, kao što su: prioritet, status, jedinstveni identifikator (PID), naziv korisnika koji je pokrenuo proces, zauzeti ulazno-izlazni uređaji, i slično (Tanenbaum i Bos 2015: 94).
+Kontrolni blok procesa je struktura podataka koja pored trenutnog stanja procesa sadrži i druge podatke o procesu, koji se razlikuju u različitim implementacijama operativnih sistema, kao što su: prioritet, status, jedinstveni identifikator (PID), naziv korisnika koji je pokrenuo proces, zauzeti ulazno-izlazni uređaji, i slično \parencite[94]{tanenbaum2015}.
 
 \AuthorExHere
 
-Kako kontrola prepuštanja procesorskih resursa iz samog programa otežava programiranje i dovodi do slabijih performansi operativnog sistema (gledajući sisteme koji se danas koriste), uveden je planer procesa (\emph{process scheduling algorithm}, u daljem tekstu: planer). Planer je algoritam koji vodi računa o rasporedu i dužini izvršavanja procesa u operativnom sistemu. S obzirom na različite upotrebe operativnih sistema i različite tipove procesa (\emph{I/O bound} - procesi koji veći deo izvšavanja provode čekajući ulazno/izlazne uređaje i \emph{CPU bound} - procesi koji u toku izvršavanja intenzivno koriste procesorske resurse), postoje i različiti algoritmi za planere, koji obezbeđuju različite performanse operativnog sistema (Šantavec 2019).
+Kako kontrola prepuštanja procesorskih resursa iz samog programa otežava programiranje i dovodi do slabijih performansi operativnog sistema (gledajući sisteme koji se danas koriste), uveden je planer procesa (\emph{process scheduling algorithm}, u daljem tekstu: planer). Planer je algoritam koji vodi računa o rasporedu i dužini izvršavanja procesa u operativnom sistemu. S obzirom na različite upotrebe operativnih sistema i različite tipove procesa (\emph{I/O bound} - procesi koji veći deo izvšavanja provode čekajući ulazno/izlazne uređaje i \emph{CPU bound} - procesi koji u toku izvršavanja intenzivno koriste procesorske resurse), postoje i različiti algoritmi za planere, koji obezbeđuju različite performanse operativnog sistema \parencite{santavec2019}.
 
 Ovaj rad se zasniva na modifikaciji Linuksovog O(1) planera. Analizirani su vreme i učestalost izvršavanja procesa kada su u određivanje njegovog prioriteta bili uključeni prosečno vreme izvršavanja ili broj otvorenih datoteka. Implementacija algoritama je izvršena postepeno, tako da su posebno rađeni testovi za ispitivanje uticaja prosečnog vremena izvršavanja, a posebno testovi za ispitivanje uticaja broja otvorenih datoteka. Rezultati su upoređeni, kako međusobno, tako i sa originalnim O(1) planerom. Takođe su upoređeni i sa CFS planerom, koji se koristi i danas, u verziji jezgra 2.6.23.
 
@@ -49,15 +49,15 @@ Svaki proces ima kontrolni blok procesa (u daljem tekstu: kontrolni blok), u koj
     \item \texttt{prio} (označena celobrojna vrednost) -- dinamički prioritet procesa u intervalu od 0 do 139, na njega utiču bonusi/penali iz planera
     \item \texttt{static\_prio} (označena celobrojna vrednost) - prioritet koji je zadao korisnik poznat i kao nice vrednost. Ne menja se, osim ukoliko korisnik to ne zahteva i njegova vrednost se kreće od -20 do 19 (-20 je najveći, a 19 najmanji prioritet)
     \item \texttt{sched\_time} (neoznačena celobrojna vrednost veličine najmanje 64 bita) -- vreme koje je proces proveo koristeći procesor
-    \item \texttt{pid} (označena celobrojna vrednost tipa \texttt{pid\_t}) -- PID (process identification), jedinstveni identifikator (Tanenbaum i Bos 2015: 734)
+    \item \texttt{pid} (označena celobrojna vrednost tipa \texttt{pid\_t}) -- PID (process identification), jedinstveni identifikator \parencite[734]{tanenbaum2015}
     \item \texttt{files} -- tabela otvorenih datoteka sa jedinstvenim identifikatorom za svaku.
 \end{itemize}
 
 \subsection{O(1) planer procesa}
 
-Kako se rad zasniva na modifikaciji O(1) planera, sledi opis njegovog načina rada. Naziv je dobio po tome što vreme za odabir procesa, kom treba da se dodele procesorski resursi, ne zavisi od broja procesa, stoga ima algoritamsku kompleksnost O(1). (Tanenbaum i Bos 2015: 749). Svakom procesoru je dodeljen red opsluživanja (\emph{queue}). Red opsluživanja sa kog se pokreću procesi sadrži dva niza, jedan sa procesima koji čekaju na procesorske resurse i jedan sa procesima koji su potrosili svoje procesorske resurse. Procesi se pokreću redom po prioritetu iz niza koji sadrži procese koji nisu iskoristili procesorske resurse. Kada proces potroši procesorsko vreme koje mu je dodeljeno (ili sam prepusti procesor) prebacuje se u niz sa procesima koji su iskoristili svoje procesorsko vreme, i preračunavaju mu se prioritet i kvanta procesorskog vremena koja mu se dodeljuje (vreme koje proces dobije na procesoru između dva prekida).
+Kako se rad zasniva na modifikaciji O(1) planera, sledi opis njegovog načina rada. Naziv je dobio po tome što vreme za odabir procesa, kom treba da se dodele procesorski resursi, ne zavisi od broja procesa, stoga ima algoritamsku kompleksnost O(1). \parencite[749]{tanenbaum2015}. Svakom procesoru je dodeljen red opsluživanja (\emph{queue}). Red opsluživanja sa kog se pokreću procesi sadrži dva niza, jedan sa procesima koji čekaju na procesorske resurse i jedan sa procesima koji su potrosili svoje procesorske resurse. Procesi se pokreću redom po prioritetu iz niza koji sadrži procese koji nisu iskoristili procesorske resurse. Kada proces potroši procesorsko vreme koje mu je dodeljeno (ili sam prepusti procesor) prebacuje se u niz sa procesima koji su iskoristili svoje procesorsko vreme, i preračunavaju mu se prioritet i kvanta procesorskog vremena koja mu se dodeljuje (vreme koje proces dobije na procesoru između dva prekida).
 
-Na sam prioritet procesa utiče koliko on koristi procesorskih resursa i na osnovu toga mu se daju bonusi/penali od -5 do +5. Procesima koji su posebno interaktivni može da se dopusti još jedno izvršavanje. Kvanta procesorskog vremena koju proces može da dobije je unapred mapirana za svaki statički prioritet (\emph{nice} vrednost). Za najveći prioritet (-20) ona iznosi 800 ms, za najmanji prioritet (+19), iznosi 5 ms. Kada se niz sa procesima koji čekaju procesorkso vreme isprazni, dolazi do smene pokazivača, tako da niz sa procesima koji su potrošili svoje procesorsko vreme postaje niz sa procesima koji čekaju procesorsko vreme i obrnuto (Love 2005: The Linux Scheduling Algorithm; Ishkov 2015).
+Na sam prioritet procesa utiče koliko on koristi procesorskih resursa i na osnovu toga mu se daju bonusi/penali od -5 do +5. Procesima koji su posebno interaktivni može da se dopusti još jedno izvršavanje. Kvanta procesorskog vremena koju proces može da dobije je unapred mapirana za svaki statički prioritet (\emph{nice} vrednost). Za najveći prioritet (-20) ona iznosi 800 ms, za najmanji prioritet (+19), iznosi 5 ms. Kada se niz sa procesima koji čekaju procesorkso vreme isprazni, dolazi do smene pokazivača, tako da niz sa procesima koji su potrošili svoje procesorsko vreme postaje niz sa procesima koji čekaju procesorsko vreme i obrnuto \parencites{love2005}{ishkov2015}.
 
 \subsection{CFS planer procesa}
 
@@ -65,24 +65,24 @@ CFS (Completely Fair Scheduler) algoritam je zamenio O(1) algoritam i koristi se
 
 Algoritam je zasnovan na konceptu modela planera za idealan procesor koji može da izvršava više procesa istovremeno (\emph{multitasking procesor}). CFS algoritam ovom konceptu teži tako što za svaki proces preračunava vreme koje će dobiti, uzimajući u obzir i ostale procese.
 
-Red opsluživanja sa kog se pokreću procesi nije izdeljen na nizove kao u O(1) algoritmu, već predstavlja crveno-crno stablo (Cormen, Leiserson, Rivest, Stein 2009: 308-311). Procesi se sortiraju u crveno-crnom stablu po vremenu koje su proveli na procesoru (izraženo u nanosekundama). Vreme koje proces provodi na procesoru ne protiče jednako za sve procese, već zavisi od njihovog dinamičkog prioriteta (\emph{prio} vrednost) i statičkog prioriteta (\emph{nice} vrednosti). Za procese nižeg prioriteta, vreme brže protiče, i pre će ostati bez procesorskih resursa od procesa sa višim prioritetom. Kada u stablu postoji proces sa manjim vremenom izvršavanja (sa uračunatim bonusima i penalima) od procesa koji se trenutno pokreće, trenutno aktivan proces će biti premešten u stablu i prepustiće procesorske resurse sledećem procesu. Sledeći proces koji se pokreće je uvek proces koji se nalazi skroz levo u stablu (Tanenbaum i Bos 2015: 749).
+Red opsluživanja sa kog se pokreću procesi nije izdeljen na nizove kao u O(1) algoritmu, već predstavlja crveno-crno stablo \parencite[308-311]{cormen2009}. Procesi se sortiraju u crveno-crnom stablu po vremenu koje su proveli na procesoru (izraženo u nanosekundama). Vreme koje proces provodi na procesoru ne protiče jednako za sve procese, već zavisi od njihovog dinamičkog prioriteta (\emph{prio} vrednost) i statičkog prioriteta (\emph{nice} vrednosti). Za procese nižeg prioriteta, vreme brže protiče, i pre će ostati bez procesorskih resursa od procesa sa višim prioritetom. Kada u stablu postoji proces sa manjim vremenom izvršavanja (sa uračunatim bonusima i penalima) od procesa koji se trenutno pokreće, trenutno aktivan proces će biti premešten u stablu i prepustiće procesorske resurse sledećem procesu. Sledeći proces koji se pokreće je uvek proces koji se nalazi skroz levo u stablu \parencite[749]{tanenbaum2015}.
 
 \subsection{Heš funkcija i heš tabela}
 
 Za prvu predloženu modifikaciju je potrebno uvesti pojmove heš funkcije i heš tabele, kao i korišćen algoritam za dobijanje heš vrednosti.
 
-Heš funkcija je funkcija koja dati niz karaktera proizvoljne dužine mapira na niz karaktera fiksne duzine. To su jednosmerne funkcije, što znači da se iz dobijene vrednosti ne može dobiti originalna vrednost, a da se ne isproba svaka moguća kombinacija (Cormen et al. 2015: 262).
+Heš funkcija je funkcija koja dati niz karaktera proizvoljne dužine mapira na niz karaktera fiksne duzine. To su jednosmerne funkcije, što znači da se iz dobijene vrednosti ne može dobiti originalna vrednost, a da se ne isproba svaka moguća kombinacija \parencite[262]{cormen2015}.
 
 Heš tabela omogućava brz pristup podacima. Podaci su sortirani u niz i svaki podatak poseduje svoj ključ. Ključ se dobija kao ostatak pri deljenju vrednosti heš funkcije koju taj podatak poseduje i broja elemenata niza. U slučaju da dva podatka dobiju istu vrednost ključa, dolazi do kolizije koju je moguće rešiti na raličite načine, ali ovi slučajevi nisu razmatrani u modifikacijama.
 
-Za određivnje ključa za heš tabelu, u ovom radu je korišćena djb2 heš funkcija (Algorithms in C 2021: Hash algorithms). Heš se dobija algoritmom:
+Za određivnje ključa za heš tabelu, u ovom radu je korišćena djb2 heš funkcija \parencite{algorithmsC}. Heš se dobija algoritmom:
 \[
     \verb|hash(i) = hash(i-1) * 33^str[i]|
 \]
 gde je: \texttt{hash} -- rezultujuća heš vrednost (inicijalizovana na 5381), \texttt{str} -- string koji se hešuje, a
 33 -- konstanta.
 
-Na kraju se uzima ostatak pri deljenju dobijenog heša sa 100,003 kao ključ za heš tabelu. Ideja je bila da se implementira tabela sa 100,000 ulaza, međutim, kako je poželjno da broj bude prost, odabarna je ova vrednost (Knuth 1998: 515 i 516).
+Na kraju se uzima ostatak pri deljenju dobijenog heša sa 100,003 kao ključ za heš tabelu. Ideja je bila da se implementira tabela sa 100,000 ulaza, međutim, kako je poželjno da broj bude prost, odabarna je ova vrednost \parencite[515 i 516]{knuth1998}.
 
 \subsection{Datoteke i njeni deskriptori}
 
@@ -90,7 +90,7 @@ Druga modifikacija broji otvorene datoteke svakog procesa. Iz tog razloga u nast
 
 Procesi imaju mogućnost da otvaraju datoteke da bi pročitali podatke ili upisali nešto. Kako se datotekama predstavlja i komunikacija između procesa, komunikacija sa ulazno/izlaznim uređajima itd., bitno je da proces što pre završi rad sa datotekom i da je oslobodi za neki drugi proces. Iz ovog razloga je ideja da se za svaki proces broje otvorene datoteke i da taj broj utiče na prioritet procesa.
 
-Struktura podataka koja omogućava rad sa datotekama se naziva deskriptor datoteka. Broj otvorenih datoteka ne mora biti jednak broju ovorenih deskriptora datoteka (Linux Interview Questions 2020). Svaki proces ima dodeljena bar tri deskriptora datoteka: stdin (standardni ulaz), stdout (standardni izlaz), stderr (standardni ispis za greške) (Linux Programmer's manual: stdin(03) 2021).
+Struktura podataka koja omogućava rad sa datotekama se naziva deskriptor datoteka. Broj otvorenih datoteka ne mora biti jednak broju ovorenih deskriptora datoteka \parencite{linuxInterview2020}. Svaki proces ima dodeljena bar tri deskriptora datoteka: stdin (standardni ulaz), stdout (standardni izlaz), stderr (standardni ispis za greške) \parencite{linuxManualStdin} .
 
 
 \section{Implementacija algoritma}
@@ -157,7 +157,7 @@ Dobijen bonus je potrebno zapamtiti u kontrolnom bloku da bi se mogao ostvariti 
 
 \section{Rezultati i diskusija}
 
-Posebno su urađeni testovi za svaki od dva implementirana algoritama. Svi testovi su pokretani upotrebom Qemu emulatora (qemu, 2021), a vreme je mereno upotrebom izolovanog sata i ključne reči time (Busybox, 2021). Prilikom pokretanja operativnog sistema prvi proces je bio program koji je pokretao test procese. Pored test procesa, operativni sistem je automatski pokretao i procese koji većinu svog izvršavanja spavaju i čekaju poziv. Ovi procesi nisu uklanjani jer ne troše puno procesorskih resursa i smatrano je da ne utiču u dovoljnoj meri na same rezultate.
+Posebno su urađeni testovi za svaki od dva implementirana algoritama. Svi testovi su pokretani upotrebom Qemu emulatora \parencite{qemu}, a vreme je mereno upotrebom izolovanog sata i ključne reči time \parencite{busybox}. Prilikom pokretanja operativnog sistema prvi proces je bio program koji je pokretao test procese. Pored test procesa, operativni sistem je automatski pokretao i procese koji većinu svog izvršavanja spavaju i čekaju poziv. Ovi procesi nisu uklanjani jer ne troše puno procesorskih resursa i smatrano je da ne utiču u dovoljnoj meri na same rezultate.
 
 Za testove sa CFS algoritmom korišćena je verzija Linuksovog jezgra 2.6.23.
 
@@ -235,87 +235,7 @@ Moguće poboljšanje za planer koji uzima broj otvorenih datoteka u obzir bi bil
 
 Takođe, nije provereno da li bi sistem sa ovakvim dodatnim zauzećem memorije mogao da pokrene isti broj procesa, kao i originalni bez dodatnih modifikacija.
 
-\section{Literatura}
-\Source{%
-    Algorithms in C, Hash algorithms,\\
-    https://thealgorithms.github.io/C/d7/d3b/\\group\_\_hash.html
-    [Pristupljeno 12. maja 2021].
-}
-\Source{%
-    Busybox. Dostupno na:\\
-    https://www.commandlinux.com/man-page/man1/\\busybox.1.html
-    [Pristupljeno 12. maja 2021].
-}
-\Source{%
-    Clock sources, Clock events, sched clock() and delay timers, (kernel timekeeping abstractions). 
-    Dostupno na:\\ https://www.kernel.org/doc/Documentation/\\timers/timekeeping.txt 
-    [Pristupljeno 3. septembra 2020].
-}
-\Source{%
-    Cormen T. H., Leiserson C. E., Rivest R. R., Stein C. 2009. 
-    \emph{Introduction to Algorithms}.
-    Kembridž: MIT Press
-}
-\Source{%
-    Ishkov N. 2015.
-    \emph{A complete guide to Linux process scheduling}. MSc Thesis.
-    University of Tampere, School of Information Sciences
-}
-\Source{%
-    Knuth D. E. 1998.
-    \emph{The art of computer programming}.
-    Boston: Addison-Wesley
-}
-\Source{%
-    Linux Interview Questions 2020. Linux Interview Questions: Open Files / Open File Descriptors.
-    Dostupno na:\\https://www.thegeekdiary.com/linux-interview-\\questions-open-files-open-file-descriptors/
-    [Pristupljeno 3. septembra 2021].
-}
-\Source{%
-    Linux Programmer’s manual, stdin(03). 
-    Dostupno na:\\https://man7.org/linux/man-pages/man3/stdout.3\\.html 
-    [Pristupljeno 12. maja 2021].
-}
-\Source{%
-    Love R. 2005.
-    \emph{Linux kernel development, second edition}.
-    Karmel: Sams Publishing
-}
-\Source{%
-    Love R. 2010.
-    \emph{Linux kernel development, third edition}.
-    Boston: Addison-Wesley
-}
-\Source{%
-    Marić M. 2017.
-    \emph{Operativni sistemi}.
-    Beograd: Univerzitet u Beogradu
-}
-\Source{%
-    Qemu.
-    Dostupno na: https://qemu.org 
-    [Pristupljeno 3. septembra 2020].
-}
-\Source{%
-    Schmidt B. 2015.
-    CPU Clocks and Clock Interrupts, and Their Effects on Schedulers.
-    U \emph{Overload}, \textbf{23} (130): 23.
-    Dostupno na:\\https://accu.org/journals/overload/23/130/\\schmidt\_2185/
-}
-\Source{%
-    Šantavec D. 2019.
-    Implementacija kružnog algoritma sa zadržavanjem u planeru procesa na MP/M II operativnom sistemu.
-    \emph{Petničke sveske}, 78: 329.
-}
-\Source{%
-    Tanenbaum S. A., Bos H. 2015.
-    \emph{Modern Operating Systems}.
-    London: Pearson
-}
-\Source{%
-    tuxthink 2012. \emph{Module to print the open files of a process}.
-    Dostupno na: \\https://tuxthink.blogspot.com/2012/05/module-to-\\print-open-files-of-process.html
-    [Pristupljeno 3. septembra 2020.]
-}
+\printbibliography[heading=subbibliography,title={Literatura}]
+% \section{Literatura}
 \EndPaper
 \clearpage
