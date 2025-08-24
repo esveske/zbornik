@@ -17,6 +17,14 @@ algpseudocodex:
 refs2020: 2020/*/*/refs.bib
 	echo "\033[0;31m REFS\033[0m"
 	cat 2020/*/*/refs.bib > 2020/refs.bib
+pandoc:
+	unzip -qq -d docx templates/rad.docx
+	mv docx/word/media .
+	pandoc templates/rad.docx --lua-filter=./filter.lua -o izDocxa.tex
+	cp templates/rad.tex .
+	tectonic rad.tex
+	rm rad.tex
+	rm -rf docx/ media/
 
 y2020: refs2020
 	echo "\033[0;31m Y2020\033[0m"
@@ -31,3 +39,5 @@ clean:
 	rm -f */*/*/plot_*.pdf
 	rm -rf output/
 	rm -rf */refs.bib
+	rm izDocxa.tex
+	rm rad.tex

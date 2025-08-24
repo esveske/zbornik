@@ -38,6 +38,9 @@
 \RequirePackage{amsthm}
 \RequirePackage{booktabs,multicol, multirow,boldline,makecell}
 \RequirePackage[absolute,overlay]{textpos}
+\RequirePackage{longtable} % pandoc output
+\RequirePackage[normalem]{ulem} % pandoc output
+\newcommand{\ul}[1]{\uline{#1}}
 
 \RequirePackage[serbian, english]{babel}
 \RequirePackage{csquotes} % Package biblatex Warning: 'babel/polyglossia' detected but 'csquotes' missing.

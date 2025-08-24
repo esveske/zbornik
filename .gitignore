@@ -305,3 +305,5 @@ TSWLatexianTemp*
 */refs.bib
 output/
 run.sh
+./rad.tex
+izDocxa.tex
