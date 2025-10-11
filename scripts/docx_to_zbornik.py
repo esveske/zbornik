@@ -1,28 +1,211 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Convert a Word .docx exported from the Petnica template (or a close variant) into LaTeX.
+Petnica DOCX → Zbornik LaTeX converter
 
-This script is intentionally opinionated: it understands only the subset of
-Word features common in Petnica papers. The goal is to produce a `main.tex`
-file (plus any extracted media) that fits into the existing LaTeX workflow
-without manual post-processing.
+Overview
+--------
+This script converts a Microsoft Word .docx file prepared with the Petnica
+template (or a close variant) into a LaTeX source file that fits the Zbornik
+workflow. It targets the macro set used by the Petničke sveske / Zbornik
+class (e.g. `sveska.cls`) and emits a single `main.tex` plus any extracted
+media. The output is designed to compile with XeLaTeX or LuaLaTeX.
 
-v0.5.0 (drop-in replacement):
-- Captions: robust detection from nearby paragraphs within ±5 (skips empties), captures
-  full "Label Number. Text" for bilingual Slika/Figure and Tabela/Table; removes caption
-  paragraphs from body.
-- Autorstvo: collect from (1) text boxes styled "Autorstvo" and (2) early paragraphs that
-  look like author/mentor/school lines; emit as \AuthorEx{...} and place \AuthorExHere
-  just before the first emitted content (text/figure/table).
-- English abstract: if not styled, scan tail after "Literatura" → detect English Name →
-  English Title → English abstract paragraphs; fill \TitleEng + AbstractEng.
-- References: emit \section{Literatura} exactly once; subsequent paragraphs become \Source{...}.
-- Tables: improved column counting (with gridSpan), wide-table heuristic (→ table*),
-  \multicolumn for horizontal spans; warn on vMerge (no \multirow).
-- Lists: preserve via w:numPr (numId/ilvl).
+What it produces
+----------------
+`<output_dir>/main.tex` with the following structure (macros expected to be
+provided by the Petnica LaTeX class):
+  \Author{...}
+  \Title{...}
+  \TitleEng{...}                   % when available/recovered
+  \begin{Abstract} ... \end{Abstract}
+  \begin{AuthorEx} ... \end{AuthorEx}  % “Autorstvo” footnote content
+  \begin{AbstractEng} ... \end{AbstractEng}
+  \StartDoublePaper
+  % body: text, lists, figures, tables, sections...
+  \section{Literatura}
+  \Source{...}                     % one per reference entry (non-empty only)
+  \EndPaper
 
-Compile with XeLaTeX or LuaLaTeX (sveska.cls uses fontspec).
+And a set of copied/normalized media files placed in `<output_dir>`.
+
+High-level pipeline
+-------------------
+1) Unzip and parse the DOCX:
+   - Parse `word/document.xml` as a sequence of block elements (paragraphs and tables).
+   - Load `word/_rels/document.xml.rels` to resolve embedded images and hyperlinks.
+   - Load `word/numbering.xml` (if present) to understand list formatting (bullet vs decimal).
+
+2) Preprocess:
+   - Collect text from any text boxes (`wps:txbx`) styled "Autorstvo" (used for the AuthorEx footnote).
+   - Inspect section properties to estimate single-column width (for wide figure heuristic).
+
+3) Convert blocks (single pass, in document order):
+   - Front matter by style:
+     * `Imeiprezime`: the first occurrence is taken as the authors line (flag-guarded).
+     * `Autorstvo`: collected for the AuthorEx footnote.
+     * `Naslov`: Serbian title.
+     * `Apstrakt`: Serbian abstract paragraphs (rich text to LaTeX).
+     * `TitleEng`: English title (if provided).
+     * `AbstractEng`: English abstract paragraphs (if provided).
+   - Body content:
+     * Section headings: by Word style (`Heading2/3/4`) or by recognizable titles
+       (e.g., "Uvod", "Rezultati", "Diskusija", "Zaključak", "Literatura", etc.).
+       Emitted as `\section`, `\subsection`, or `\subsubsection`.
+     * Lists: inspect `w:numPr` (numId/ilvl). Map bullets → `itemize`, decimals → `enumerate`.
+       Maintain a nesting stack, open/close environments as needed.
+     * Figures: detect inline drawings; resolve target via relationships; compute width (EMU)
+       and compare with the estimated single-column width.
+         - Wide figures → `\FigureDouble{file}{sr}{en}`
+         - Regular figures → `\Figure[H]{file}{sr}{en}`
+       Captions are detected near the figure within ±5 paragraphs, bilingual-aware:
+         “Slika N: … / Figure N: …”. The caption paragraphs are marked consumed and
+         not emitted as body text. If captions are embedded in the same paragraph,
+         they are captured and attached to the figure at emission time.
+     * Tables: convert `w:tbl` to a tabular environment, tracking horizontal spans
+       (`w:gridSpan` → `\multicolumn`). Vertical merges (`w:vMerge`) are detected; a
+       warning is emitted (no `\multirow` synthesis). A simple, robust column spec is
+       generated using centered columns. Wide tables are selected by heuristic:
+         - Many columns (≥4), or a long header line, or long cells with ≥3 columns
+         → `\TableDouble{<tabular>}{sr}{en}{}`
+         Else → `\Table{<tabular>}{sr}{en}{}`
+       Captions are detected exactly as for figures. The “{ }” slot is reserved for
+       optional notes.
+     * References: the first paragraph styled "Literatura" or with literal text
+       “literatura” / “references” starts a dedicated references section:
+         - Emit exactly one `\section{Literatura}`.
+         - While collecting references, each non-blank paragraph is emitted as
+           `\Source{...}` (empty lines are ignored to avoid stray `\Source{}`).
+         - Collection ends on the next heading/section marker.
+
+4) English tail recovery (when the document lacks English title/abstract):
+   - After the last “Literatura/References” marker, scan the tail:
+     * Detect an English name line (Latin letters, title-case heuristic).
+     * Next line that looks like a short English title (≤16 words) becomes `\TitleEng`.
+     * 1–3 following English paragraphs (keyword heuristic) form `AbstractEng`.
+
+5) Media handling:
+   - All embedded images referenced by relationships are copied verbatim to `<output_dir>`.
+   - Optional normalization (best-effort, if tools are present):
+     * Convert EMF/WMF/TIFF → PNG using LibreOffice (`soffice --headless`).
+     * Sanitize filenames to ASCII (deduplicate if necessary).
+     * Optionally downsize large rasters using ImageMagick `mogrify`.
+   - If filenames were changed by normalization, `main.tex` is rewritten to update paths.
+
+Word styles and heuristics
+--------------------------
+Recognized front-matter styles:
+  - `Imeiprezime` → `\Author{...}` (first occurrence only; a flag prevents duplicates).
+  - `Autorstvo` → content for `\begin{AuthorEx}...\end{AuthorEx}`.
+  - `Naslov` → `\Title{...}`.
+  - `Apstrakt` → `\begin{Abstract}...\end{Abstract}`.
+  - `TitleEng` → `\TitleEng{...}`.
+  - `AbstractEng` → `\begin{AbstractEng}...\end{AbstractEng}`.
+
+Section heading styles:
+  - `Heading2` → `\section{...}`
+  - `Heading3` → `\subsection{...}`
+  - `Heading4` → `\subsubsection{...}`
+  - In addition, the converter recognizes common section titles by text (e.g., “Uvod”,
+    “Rezultati”, “Diskusija”, “Zaključak”, “Literatura”) and treats them as section starts.
+
+Caption detection (figures/tables):
+  - Search window: ±5 paragraphs around the figure/table block; skip empty lines.
+  - Bilingual pattern (case-insensitive): `^(Slika|Figure|Tabela|Table) <N>[:.]? <text>`
+  - When both Serbian and English are found, both are attached. Otherwise the available
+    caption is reused for both languages. The numeric `<N>` is honored when the
+    sequential counter matches; otherwise, the line is accepted opportunistically.
+  - Consumed caption paragraphs are suppressed from the output.
+
+Lists:
+  - Preserve nesting and list type using `word/numbering.xml` (bullet vs decimal).
+  - Gaps in nesting levels are filled with `itemize` to keep LaTeX balanced.
+
+Math conversion (Pandoc required)
+---------------------------------
+- Math is converted **only via Pandoc**:
+  1) Try Pandoc’s OMML reader (`-f omml -t latex`) directly on the math XML nodes.
+  2) If unavailable, wrap the math in a minimal DOCX and let Pandoc convert from DOCX.
+- If Pandoc is missing or both conversion paths fail, the converter aborts with a
+  clear error message. There is **no internal OMML fallback**.
+- Inline math is emitted as `\( ... \)`, display math as `\begin{equation}...\end{equation}`
+  unless Pandoc has already produced a block environment.
+
+Hyperlinks and inline formatting
+--------------------------------
+- Hyperlinks created in Word (with relationship targets) are converted to `\href{...}{text}`.
+- Inline text runs retain a subset of formatting: bold, italic, underline, code
+  (`\texttt{}`), superscript (`\textsuperscript{}`), subscript (`\textsubscript{}`).
+- Text is escaped for LaTeX special characters.
+
+AuthorEx placement
+------------------
+- All “Autorstvo” lines are collected into `\begin{AuthorEx}...\end{AuthorEx}` in the header.
+- `\AuthorExHere` is inserted automatically just before the **first piece of emitted content**
+  (text/figure/table/heading) in the body, ensuring the footnote marker appears in the right place.
+
+Wide/regular figures and tables
+-------------------------------
+- The script estimates the single-column width from section properties (`w:sectPr/w:cols`)
+  and compares it to the image’s EMU width from the drawing `wp:extent`.
+- Figures wider than ~105% of one column are emitted as `\FigureDouble{...}` (two columns),
+  otherwise `\Figure[H]{...}`.
+- Tables use a simple heuristic (column count/length) to choose between `\Table` and
+  `\TableDouble`.
+
+References
+----------
+- The references section is emitted exactly once as `\section{Literatura}`.
+- Each **non-blank** paragraph while collecting references becomes one `\Source{...}`.
+  (Blank paragraphs are ignored to avoid stray `\Source{}`.)
+- Reference collection ends on the next heading/section marker or abstract marker.
+
+CLI
+---
+Usage:
+  python3 docx_to_zbornik.py INPUT.docx OUTPUT_DIR [--label LABEL]
+
+Arguments:
+  INPUT.docx   Path to the source DOCX.
+  OUTPUT_DIR   Directory where `main.tex` and media files are written.
+  --label      Optional LaTeX label to add after `\StartDoublePaper`. If omitted,
+               a label is generated from the input filename: `doc:<slug>`.
+
+Exit codes:
+  0  Success.
+  2  Input file not found.
+  3  Pandoc missing or failed to convert math (hard error).
+
+External tools (optional but supported):
+  - LibreOffice (`soffice`) for EMF/WMF/TIFF → PNG conversion.
+  - ImageMagick (`mogrify`) for optional raster downscaling.
+
+Assumptions and limitations
+---------------------------
+- The converter targets the subset of Word features typical for Petnica papers.
+- Vertical table merges (`w:vMerge`) are detected, but no `\multirow` is generated;
+  a warning is printed to stderr.
+- Only the **first** `Imeiprezime` paragraph is used as the authors line (flag-guarded),
+  reflecting the expected Petnica template usage.
+- Captions are matched by a narrow bilingual pattern and a small neighborhood window.
+- Complex shapes, floating text frames (other than text boxes used for “Autorstvo”),
+  and exotic numbering/custom styles are not fully supported.
+- Bibliographic formatting is not interpreted; references are passed verbatim to
+  `\Source{...}` entries.
+- The LaTeX macros referenced here must exist in the document class/style you compile with.
+
+Implementation notes
+--------------------
+- XML is parsed with `xml.etree.ElementTree`.
+- Namespaces are centralized via `NS` and accessed through helper functions.
+- Lists are decoded using `word/numbering.xml` mapping from `numId`/`ilvl` to
+  abstract list definitions, simplified to bullet vs decimal.
+- Filenames are sanitized to ASCII and deduplicated; any renames are reflected back
+  into `main.tex`.
+- Diagnostic warnings and errors are printed to stderr; progress messages (like
+  “Wrote …” and “Copied media …”) go to stdout.
+
+Compile the result with XeLaTeX or LuaLaTeX under the Petnica/Zbornik class.
 """
 from __future__ import annotations
 
@@ -101,10 +284,7 @@ LATEX_SPECIALS = {
 def escape_latex(text: str) -> str:
     out: List[str] = []
     for ch in text:
-        if ch in LATEX_SPECIALS:
-            out.append(LATEX_SPECIALS[ch])
-        else:
-            out.append(ch)
+        out.append(LATEX_SPECIALS.get(ch, ch))
     return "".join(out)
 
 def slugify(text: str, *, fallback: str = "paper") -> str:
@@ -143,16 +323,12 @@ def looks_like_section_title(text: str) -> bool:
     }
     return s in candidates
 
-def is_numeric_cell(s: str) -> bool:
-    s = s.strip()
-    return bool(re.match(r"^[\+\-]?\d+([.,]\d+)?(\s*[A-Za-z%/°\-\(\)\[\]\{\}\^_]+)?$", s))
-
 def ascii_sanitize(stem: str) -> str:
     s = unicodedata.normalize("NFKD", stem).encode("ascii", "ignore").decode()
     s = re.sub(r"[^A-Za-z0-9._-]+", "_", s).strip("._-")
     return s or "img"
 
-# Full caption pattern: captures label + number + tail, preserving original label (for unnumbered LaTeX)
+# Full caption pattern
 CAP_FULL = re.compile(
     r"^\s*(Slika|Figure|Tabela|Table)\s+(\d+)[:\.]?\s*(.*\S)?\s*$",
     re.IGNORECASE,
@@ -230,17 +406,10 @@ class DocxPackage:
 # -------------------------------------------------------------------------
 # Conversion context
 
-@dataclass
-class FigureAsset:
-    block_index: int         # index in the full blocks sequence
-    image_rid: str
-    image_name: str          # e.g. media/image1.png
-
 class ConversionContext:
     def __init__(self, docx: DocxPackage):
         self.docx = docx
         self.blocks = list(findall(docx.document, ".//w:body/*"))
-        self.figures: List[FigureAsset] = []
         self.author_box_lines: List[str] = []
         self._preprocess_blocks()
         self.single_column_width_emu: Optional[float] = self._compute_single_column_width_emu()
@@ -283,32 +452,24 @@ class ConversionContext:
 
     def _preprocess_blocks(self) -> None:
         """
-        - Capture inline drawings (figures) with their block indexes.
-        - Collect Autorstvo from text boxes (wps:txbx).
+        - Collect Autorstvo from text boxes (wps:txbx) styled "Autorstvo".
         """
-        print("Preprocessing document blocks...")
-        for bidx, el in enumerate(self.blocks):
-            if el.tag == qname("w", "p"):
-                # scan for drawings (figures)
-                for drawing in findall(el, ".//w:drawing"):
-                    blip = find(drawing, ".//a:blip")
-                    if blip is not None:
-                        rid = blip.attrib.get(qname("r", "embed"))
-                        if rid:
-                            target = self.docx.relationships.get(rid)
-                            if target:
-                                self.figures.append(FigureAsset(bidx, rid, target))
-                    # gather Autorstvo from any text box content
-                    txbx = find(drawing, ".//wps:txbx")
-                    if txbx is not None:
-                        for inner_p in findall(txbx, ".//w:p"):
-                            if self._paragraph_style(inner_p) == "Autorstvo":
-                                text = self._collect_plain_text(inner_p)
-                                print("Autorstvo:", text)
+        for el in self.blocks:
+            if el.tag != qname("w", "p"):
+                continue
+            for drawing in findall(el, ".//w:drawing"):
+                txbx = find(drawing, ".//wps:txbx")
+                if txbx is None:
+                    continue
+                tmp_lines: List[str] = []
+                for inner_p in findall(txbx, ".//w:p"):
+                    if self._paragraph_style(inner_p) == "Autorstvo":
+                        text = self._collect_plain_text(inner_p)
+                        text = re.sub(r"\s+", " ", text).strip()
                         if text:
-                            text = re.sub(r"\s+", " ", text).strip()
-                            if text:
-                                self.author_box_lines.append(text)
+                            tmp_lines.append(text)
+                if tmp_lines:
+                    self.author_box_lines.extend(tmp_lines)
 
     def _compute_single_column_width_emu(self) -> Optional[float]:
         """
@@ -392,112 +553,27 @@ class InlineFormatting:
             result = f"\\textsubscript{{{result}}}"
         return result
 
-class OmmlConverter:
-    """
-    Convert a subset of Office Math Markup Language (OMML) into LaTeX.
-    Covers the constructs observed in Petnica templates (roots, n-ary sums,
-    superscripts). Falls back to concatenating child nodes for unknown tags.
-    """
-
-    OPERATOR_MAP = {
-        "∑": "\\sum",
-        "∏": "\\prod",
-        "∫": "\\int",
-    }
-
-    def convert(self, node: ET.Element) -> str:
-        if node is None:
-            return ""
-        tag = node.tag
-        if tag in {qname("m", "oMath"), qname("m", "oMathPara"), qname("m", "e"), qname("m", "deg"), qname("m", "sub"), qname("m", "sup")}:
-            return "".join(self.convert(child) for child in node)
-        if tag == qname("m", "r"):
-            return "".join(self.convert(child) for child in node)
-        if tag == qname("m", "t"):
-            text = node.text or ""
-            return text.replace("\u00a0", "~")
-        if tag == qname("m", "rad"):
-            degree = self.convert(find(node, "m:deg"))
-            body = self.convert(find(node, "m:e")).strip()
-            if degree:
-                return f"\\sqrt[{degree.strip()}]{{{body}}}"
-            return f"\\sqrt{{{body}}}"
-        if tag == qname("m", "nary"):
-            return self._convert_nary(node)
-        if tag in {qname("m", "sSup"), qname("m", "sSub"), qname("m", "sSubSup")}:
-            return self._convert_script(node)
-        if tag in {qname("m", "ctrlPr"), qname("m", "radPr"), qname("m", "naryPr"), qname("m", "sSupPr"), qname("m", "sSubPr"), qname("m", "sSubSupPr")}:
-            return ""
-        if tag == qname("w", "rPr"):
-            return ""
-        return "".join(self.convert(child) for child in node)
-
-    def _convert_nary(self, node: ET.Element) -> str:
-        symbol = "\\sum"
-        use_limits = False
-
-        pr = find(node, "m:naryPr")
-        if pr is not None:
-            chr_el = find(pr, "m:chr")
-            if chr_el is not None:
-                val = chr_el.attrib.get(qname("m", "val"), "")
-                if val:
-                    symbol = self.OPERATOR_MAP.get(val, val)
-            lim = find(pr, "m:limLoc")
-            if lim is not None and lim.attrib.get(qname("m", "val")) == "undOvr" and symbol.startswith("\\"):
-                use_limits = True
-
-        sub_part = self.convert(find(node, "m:sub")).strip()
-        sup_part = self.convert(find(node, "m:sup")).strip()
-        expr = self.convert(find(node, "m:e")).strip()
-
-        out = symbol
-        if use_limits and symbol.startswith("\\"):
-            out += "\\limits"
-        if sub_part:
-            out += f"_{{{sub_part}}}"
-        if sup_part:
-            out += f"^{{{sup_part}}}"
-        if expr:
-            out += f" {expr}"
-        return out
-
-    def _convert_script(self, node: ET.Element) -> str:
-        base = self.convert(find(node, "m:e")).strip()
-        sub = self.convert(find(node, "m:sub")).strip()
-        sup = self.convert(find(node, "m:sup")).strip()
-
-        out = base or ""
-        if sub:
-            out += f"_{{{sub}}}"
-        if sup:
-            out += f"^{{{sup}}}"
-        return out
-
 class MathConverter:
-    """Dispatch math conversion via Pandoc when available, otherwise fallback to OmmlConverter."""
+    """
+    Math conversion via Pandoc only.
+    - Requires Pandoc to be installed and on PATH.
+    - Tries Pandoc OMML reader first; if unavailable, tries Pandoc via DOCX snippet.
+    - If both paths fail, raises RuntimeError.
+    """
 
     def __init__(self):
         self._pandoc_bin = shutil.which("pandoc")
-        self._pandoc_supports_omml = False
-        if self._pandoc_bin:
-            self._pandoc_supports_omml = self._check_pandoc_supports_omml()
-        self._omml = OmmlConverter()
+        if not self._pandoc_bin:
+            raise RuntimeError("Error: Pandoc is required for math conversion but was not found on PATH.")
+        self._pandoc_supports_omml = self._check_pandoc_supports_omml()
 
     def convert(self, node: ET.Element, *, display: bool) -> Tuple[str, bool]:
-        """
-        Return (latex_snippet, already_block).
-        When already_block is True the snippet already contains its own LaTeX math environment.
-        """
         latex, is_block = self._pandoc_convert(node, display=display)
         if latex is None:
-            latex = self._omml.convert(node).strip()
-            is_block = False
+            raise RuntimeError("Error: Pandoc failed to convert OMML math (neither OMML reader nor DOCX path succeeded).")
         return latex, is_block
 
     def _pandoc_convert(self, node: ET.Element, *, display: bool) -> Tuple[Optional[str], bool]:
-        if not self._pandoc_bin:
-            return None, False
         try:
             xml = ET.tostring(node, encoding="utf-8")
         except Exception:
@@ -509,7 +585,7 @@ class MathConverter:
             text = self._pandoc_via_docx(node, display=display)
         if not text:
             return None, False
-        normalized, is_block = self._normalize_output(text, display=display)
+        normalized, is_block = self._normalize_output(text)
         if not normalized:
             return None, False
         return normalized, is_block
@@ -590,7 +666,10 @@ class MathConverter:
         return "omml" in formats
 
     @staticmethod
-    def _normalize_output(text: str, *, display: bool) -> Tuple[str, bool]:
+    def _normalize_output(text: str) -> Tuple[str, bool]:
+        """
+        Normalize Pandoc output; return (latex, is_block-env-already).
+        """
         stripped = text.strip()
         if not stripped:
             return "", False
@@ -598,9 +677,11 @@ class MathConverter:
             return stripped, True
         if stripped.startswith("\\[") and stripped.endswith("\\]"):
             return stripped[2:-2].strip(), False
+        if stripped.startswith("$$") and stripped.endswith("$"):
+            # rare malformed case; trim the trailing single '$'
+            return stripped[2:-1].strip(), False
         if stripped.startswith("$$") and stripped.endswith("$$"):
-            inner = stripped[2:-2].strip()
-            return inner, False
+            return stripped[2:-2].strip(), False
         if stripped.startswith("\\(") and stripped.endswith("\\)"):
             return stripped[2:-2].strip(), False
         if stripped.startswith("$") and stripped.endswith("$") and len(stripped) >= 2:
@@ -621,18 +702,10 @@ class ParagraphConverter:
                 parts.append(self._convert_hyperlink(node))
             elif node.tag == qname("m", "oMath"):
                 latex, is_block = self.math.convert(node, display=False)
-                if latex:
-                    if is_block:
-                        parts.append(latex)
-                    else:
-                        parts.append(f"\\({latex}\\)")
+                parts.append(latex if is_block else f"\\({latex}\\)")
             elif node.tag == qname("m", "oMathPara"):
                 latex, is_block = self.math.convert(node, display=True)
-                if latex:
-                    if is_block:
-                        parts.append(latex)
-                    else:
-                        parts.append(f"\\begin{{equation}}\n{latex}\n\\end{{equation}}")
+                parts.append(latex if is_block else f"\\begin{{equation}}\n{latex}\n\\end{{equation}}")
         return "".join(parts)
 
     def _convert_run(self, run: ET.Element) -> str:
@@ -653,18 +726,10 @@ class ParagraphConverter:
                 parts.append("\\\\")
             elif child.tag == qname("m", "oMath"):
                 latex, is_block = self.math.convert(child, display=False)
-                if latex:
-                    if is_block:
-                        parts.append(latex)
-                    else:
-                        parts.append(f"\\({latex}\\)")
+                parts.append(latex if is_block else f"\\({latex}\\)")
             elif child.tag == qname("m", "oMathPara"):
                 latex, is_block = self.math.convert(child, display=True)
-                if latex:
-                    if is_block:
-                        parts.append(latex)
-                    else:
-                        parts.append(f"\\begin{{equation}}\n{latex}\n\\end{{equation}}")
+                parts.append(latex if is_block else f"\\begin{{equation}}\n{latex}\n\\end{{equation}}")
         return "".join(parts)
 
     def _collect_formatting(self, run: ET.Element) -> InlineFormatting:
@@ -728,8 +793,7 @@ class ZbornikConverter:
         sr_full: Optional[str] = None
         en_full: Optional[str] = None
 
-        # Priority order: prev (closest → farther), then next (closest → farther)
-        offsets = [-1, -2, -3, -4, -5, 1, 2, 3, 4, 5]
+        offsets = [1, 2, 3, 4, 5, -1, -2, -3, -4, -5]
         for off in offsets:
             j = idx + off
             if not (0 <= j < len(self.ctx.blocks)):
@@ -765,7 +829,6 @@ class ZbornikConverter:
             elif label_l in {"figure", "table"} and en_full is None:
                 en_full = full
                 consumed.append(j)
-            # stop early if we have both
             if sr_full and en_full:
                 break
 
@@ -821,7 +884,6 @@ class ZbornikConverter:
     def _convert_table(self, idx: int, tbl: ET.Element, cap_sr_full: Optional[str], cap_en_full: Optional[str]) -> List[str]:
         lines: List[str] = []
 
-        # Build cells and detect spans
         rows_raw: List[List[Dict[str, str]]] = []
         ncols = 0
         vmerge_seen = False
@@ -841,44 +903,9 @@ class ZbornikConverter:
             ncols = max(ncols, sum(int(c["gridspan"]) for c in row_cells))
             rows_raw.append(row_cells)
 
-        # Column heuristics: numeric vs text
-        col_numeric = [True] * ncols
-        def expand(row: List[Dict[str, str]]) -> List[str]:
-            out: List[str] = []
-            for c in row:
-                span = int(c["gridspan"])
-                out.append(c["text"])
-                for _ in range(span - 1):
-                    out.append("")
-            return out
-
-        sample_rows = [expand(r) for r in rows_raw[: min(8, len(rows_raw))]]
-        for c in range(ncols):
-            for r in sample_rows:
-                if c >= len(r):
-                    continue
-                if not is_numeric_cell(r[c]):
-                    col_numeric[c] = False
-                    break
-
-        # Choose column spec
-        text_cols = [i for i, isnum in enumerate(col_numeric) if not isnum]
-        #primary_text = text_cols[0] if text_cols else 0
-        #secondary_text = text_cols[1] if len(text_cols) > 1 else None
-
-        colspec_parts: List[str] = []
-        for c in range(ncols):
-            #if c == primary_text:
-            #    colspec_parts.append("p{0.50\\linewidth}")
-            #elif secondary_text is not None and c == secondary_text:
-            #    colspec_parts.append("p{0.30\\linewidth}")
-            #else:
-            colspec_parts.append("c")
-        colspec = "|".join(colspec_parts)
-
+        colspec = "|".join("c" for _ in range(ncols))
         macro = "TableDouble" if self._should_wide_table(rows_raw) else "Table"
 
-        # Build tabular content
         tabular_lines: List[str] = []
         tabular_lines.append(f"\\begin{{tabular}}{{|{colspec}|}}")
         tabular_lines.append("\\hline")
@@ -922,7 +949,7 @@ class ZbornikConverter:
     def _recover_english_tail(self) -> Tuple[Optional[str], List[str]]:
         """
         If TitleEng / AbstractEng are missing, scan after the last 'Literatura'/'References'
-        marker for an English name/title/abstract block.
+        for an English name → English title → 1–3 abstract paragraphs.
         """
         n = len(self.ctx.blocks)
         lit_idx = -1
@@ -972,13 +999,11 @@ class ZbornikConverter:
             low = txt.lower()
             if not txt or looks_like_section_title(low) or low in {"zbornik radova", "petničke sveske"}:
                 break
-            # simple English-ness heuristic
             if re.search(r"\b(the|with|model|we|using|were|was|data|results|method)\b", txt.lower()):
                 abstract_en.append(txt)
                 if len(abstract_en) >= 3:
                     break
             else:
-                # stop if looks unrelated
                 if abstract_en:
                     break
             i += 1
@@ -998,52 +1023,21 @@ class ZbornikConverter:
         abstract_sr_parts: List[str] = []
         abstract_en_parts: List[str] = []
 
-        # Gather potential AuthorEx lines from text boxes already   
         author_ex_lines: List[str] = list(self.ctx.author_box_lines)
 
-        # Also collect Autorstvo-like paragraphs in the front section (before first section)
-        #first_section_idx = None
-        #for idx, blk in self.ctx.iter_body():
-        #    if blk.tag == qname("w", "p"):
-        #        t = self.ctx._collect_plain_text(blk).strip()
-        #        if t and (self.ctx._paragraph_style(blk) in {"Heading2", "Heading3", "Heading4"} or looks_like_section_title(t)):
-        #            first_section_idx = idx
-        #            break
-        # There should be no front limit, becuse the english abstract is the last few paragraphs.
-        #front_limit = first_section_idx if first_section_idx is not None else min(60, len(self.ctx.blocks))
-
-        #mentor_keywords = re.compile(r"(mentor|mentorstv|gimnaz|fakult|univerz|school|faculty|university)", re.IGNORECASE)
-        #for idx, blk in self.ctx.iter_body():
-            #if idx >= front_limit:
-            #    break
-        #    if blk.tag != qname("w", "p"):
-        #        continue
-        #    style = self.ctx._paragraph_style(blk)
-        #    txt = self.ctx._collect_plain_text(blk).strip()
-        #    if not txt:
-        #        continue
-        #    if style == "Autorstvo" or mentor_keywords.search(txt):
-        #        cleaned = re.sub(r"\s+", " ", txt)
-        #        print("Ovde??")
-        #        if cleaned and cleaned not in author_ex_lines:
-        #            author_ex_lines.append(cleaned)
-        #            print("Ovde je uso??")
-
-        # Front matter (strict styles) for authors, title, abstract (sr)
+        # Front matter (strict styles)
         flagAuthors = False
-        for idx, blk in self.ctx.iter_body():
-            if blk.tag != qname("w", "p"): # or idx >= front_limit:
+        for _, blk in self.ctx.iter_body():
+            if blk.tag != qname("w", "p"):
                 continue
             style = self.ctx._paragraph_style(blk)
             txt = self.ctx._collect_plain_text(blk).strip()
             if not txt:
                 continue
             if style == "Imeiprezime" and not flagAuthors:
-                # if is_likely_name(txt):
                 authors.append(escape_latex(txt))
-                flagAuthors = True # TO-DO There is only latex for serbian names, we added for english should be divided
-                # OR don't use language spcific things in Authors ('i' and 'and')
-            if style == "Autorstvo":
+                flagAuthors = True
+            elif style == "Autorstvo":
                 author_ex_lines.append(escape_latex(txt))
             elif style == "Naslov":
                 title_sr = escape_latex(txt)
@@ -1058,17 +1052,17 @@ class ZbornikConverter:
                 if p:
                     abstract_en_parts.append(p)
 
-        # Conservative fallbacks if missing authors/title_sr
-        if not authors or not title_sr:
-            for idx, blk in self.ctx.iter_body():
-                if blk.tag != qname("w", "p"): # or idx >= front_limit:
+        # Fallbacks if missing authors/title_sr (kept, but flagAuthors prevents duplicates)
+        if (not authors) or (not title_sr):
+            for _, blk in self.ctx.iter_body():
+                if blk.tag != qname("w", "p"):
                     continue
                 txt = self.ctx._collect_plain_text(blk).strip()
                 if not txt:
                     continue
                 if not authors and is_likely_name(txt):
                     authors.append(escape_latex(txt))
-                    continue
+                    break
                 if not title_sr and not is_likely_name(txt) and len(txt.split()) >= 5 and not looks_like_section_title(txt):
                     title_sr = escape_latex(txt)
                     break
@@ -1098,7 +1092,6 @@ class ZbornikConverter:
                 return
 
             while len(list_stack) < level - 1:
-                # Fill skipped levels with itemize so LaTeX nesting stays balanced.
                 body.append("\\begin{itemize}")
                 list_stack.append("itemize")
 
@@ -1128,7 +1121,6 @@ class ZbornikConverter:
                 if in_refs_collect:
                     in_refs_collect = False
                 close_lists()
-                # Insert footnote placement if not yet inserted
                 if not author_ex_here_inserted and author_ex_lines:
                     body.append("\\AuthorExHere")
                     author_ex_here_inserted = True
@@ -1155,7 +1147,7 @@ class ZbornikConverter:
             if style in {"Naslov", "TitleEng", "Imeiprezime", "Apstrakt", "AbstractEng", "Autorstvo"}:
                 continue
 
-            # Start references once (single heading)
+            # Start references once
             if (style == "Literatura" or plain_text.lower() in {"literatura", "references"}) and not refs_started:
                 close_lists()
                 refs.append("\\section{Literatura}")
@@ -1166,11 +1158,13 @@ class ZbornikConverter:
             if in_refs_collect and (style in {"Heading2", "Heading3", "Heading4", "Apstrakt", "AbstractEng"} or looks_like_section_title(plain_text)):
                 in_refs_collect = False
 
-            # While in refs, emit \Source and continue
+            # While in refs, emit \Source for non-empty lines only
             if in_refs_collect:
-                refs.append("\\Source{")
-                refs.append(f"    {escape_latex(plain_text)}")
-                refs.append("}")
+                content = escape_latex(plain_text).strip()
+                if content:  # <-- prevents empty \Source{}
+                    refs.append("\\Source{")
+                    refs.append(f"    {content}")
+                    refs.append("}")
                 continue
 
             # Headings → sectioning
@@ -1187,7 +1181,7 @@ class ZbornikConverter:
                     body.append(f"\\subsubsection{{{escape_latex(plain_text)}}}")
                 continue
 
-            # Inline drawings (figures) inside the paragraph → emit at that point
+            # Inline drawings (figures)
             segments: List[str | Tuple[str, ...]] = []
             cursor_parts: List[str] = []
 
@@ -1198,12 +1192,10 @@ class ZbornikConverter:
                         segments.append(t)
                     cursor_parts.clear()
 
-            had_drawing = False
             for node in block:
                 if node.tag == qname("w", "r"):
                     drawing = find(node, "w:drawing")
                     if drawing is not None:
-                        had_drawing = True
                         flush_cursor()
                         width_emu: Optional[float] = None
                         inline = find(drawing, "wp:inline")
@@ -1227,20 +1219,17 @@ class ZbornikConverter:
                             target = self.package.relationships.get(rid)
                             if not target:
                                 continue
-                            figure_counter += 1
-                            cap_sr, cap_en, consumed = self._caption_near(idx, "fig", expected_num=figure_counter)
-                            if cap_sr is None and cap_en is None:
-                                cap_sr, cap_en, consumed = self._caption_near(idx, "fig")
+                            sr_cap, en_cap, consumed = self._caption_near(idx, "fig", None)
                             for j in consumed:
                                 self._skip_block_indexes.add(j)
-                            segments.append(("FIGURE", target, Path(target).name, width_emu, cap_sr or "", cap_en or ""))
+                            segments.append(("FIGURE", target, Path(target).name, width_emu, sr_cap or "", en_cap or ""))
                         continue
                     cursor_parts.append(self.para_conv._convert_run(node))
                 elif node.tag == qname("w", "hyperlink"):
                     cursor_parts.append(self.para_conv._convert_hyperlink(node))
             flush_cursor()
 
-            # Capture caption fragments embedded in the same paragraph
+            # Merge in-paragraph caption fragments
             processed_segments: List[str | Tuple[str, ...]] = []
             has_figure = any(isinstance(seg, tuple) and seg[0] == "FIGURE" for seg in segments)
             pending_sr: Optional[str] = None
@@ -1279,17 +1268,15 @@ class ZbornikConverter:
                     pending_en = None
             if pending_sr and not has_figure:
                 processed_segments.append(pending_sr)
-                pending_sr = None
             if pending_en and not has_figure:
                 processed_segments.append(pending_en)
-                pending_en = None
             segments = processed_segments
 
             # Emit segments
-            if segments:
-                if not author_ex_here_inserted and author_ex_lines:
-                    body.append("\\AuthorExHere")
-                    author_ex_here_inserted = True
+            if segments and (not author_ex_here_inserted) and author_ex_lines:
+                body.append("\\AuthorExHere")
+                author_ex_here_inserted = True
+
             for seg in segments:
                 if isinstance(seg, str):
                     self._emit_list_item_or_par(block, seg, body, list_stack, ensure_list, close_lists)
@@ -1304,7 +1291,7 @@ class ZbornikConverter:
                         sr_text = "TODO"
                     if not en_text:
                         en_text = "TODO"
-                    if figure_is_wide(width_val):
+                    if figure_is_wide(width_emu=width_val):
                         body.append(f"\\FigureDouble{{{fig_path}}}{{{sr_text}}}{{{en_text}}}")
                     else:
                         body.append(f"\\Figure[H]{{{fig_path}}}{{{sr_text}}}{{{en_text}}}")
@@ -1323,7 +1310,7 @@ class ZbornikConverter:
             env = list_stack.pop()
             body.append(f"\\end{{{env}}}")
 
-        # If English abstract missing, try to recover from tail
+        # Recover English tail if missing
         if not title_en or not abstract_en_parts:
             rec_title_en, rec_abs_en = self._recover_english_tail()
             if rec_title_en and not title_en:
@@ -1331,36 +1318,33 @@ class ZbornikConverter:
             if rec_abs_en and not abstract_en_parts:
                 abstract_en_parts = rec_abs_en
 
-        # Header emission (Authors → Titles → Abstracts → StartDoublePaper)
-        if not header:
-            if authors:
-                authors_joined = " \\\\ ".join(authors)
-                header.append(f"\\Author{{{authors_joined}}}")
-            header.append(f"\\Title{{{title_sr or 'TODO naslov'}}}")
-            if title_en:
-                header.append(f"\\TitleEng{{{title_en}}}")
-            if abstract_sr_parts:
-                header.append("\\begin{Abstract}")
-                header.extend(abstract_sr_parts)
-                header.append("\\end{Abstract}")
-            if author_ex_lines:
-                header.append("\\begin{AuthorEx}")
-                header.append(" \\ ".join(escape_latex(l) for l in author_ex_lines))
-                header.append("\\end{AuthorEx}")
-            if abstract_en_parts:
-                header.append("\\begin{AbstractEng}")
-                header.extend(abstract_en_parts)
-                header.append("\\end{AbstractEng}")
-            header.append("\\StartDoublePaper")
-            if label:
-                header.append(f"\\label{{{label}}}")
+        # Header emission
+        if authors:
+            authors_joined = " \\\\ ".join(authors)
+            header.append(f"\\Author{{{authors_joined}}}")
+        header.append(f"\\Title{{{title_sr or 'TODO naslov'}}}")
+        if title_en:
+            header.append(f"\\TitleEng{{{title_en}}}")
+        if abstract_sr_parts:
+            header.append("\\begin{Abstract}")
+            header.extend(abstract_sr_parts)
+            header.append("\\end{Abstract}")
+        if author_ex_lines:
+            header.append("\\begin{AuthorEx}")
+            header.append(" \\ ".join(escape_latex(l) for l in author_ex_lines))
+            header.append("\\end{AuthorEx}")
+        if abstract_en_parts:
+            header.append("\\begin{AbstractEng}")
+            header.extend(abstract_en_parts)
+            header.append("\\end{AbstractEng}")
+        header.append("\\StartDoublePaper")
+        if label:
+            header.append(f"\\label{{{label}}}")
 
         return LatexOutput(header, body, refs, images_to_copy)
 
 # -------------------------------------------------------------------------
 # Media normalization
-
-SAFE_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".pdf"}
 
 def normalize_media_in_place(out_dir: Path) -> dict[str, str]:
     """
@@ -1370,8 +1354,7 @@ def normalize_media_in_place(out_dir: Path) -> dict[str, str]:
     mapping: dict[str, str] = {}
 
     def have(prog: str) -> bool:
-        from shutil import which
-        return which(prog) is not None
+        return shutil.which(prog) is not None
 
     # 1) Convert EMF/WMF/TIFF -> PNG via LibreOffice headless (if available)
     for p in list(out_dir.glob("*")):
@@ -1431,7 +1414,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
 
     package = DocxPackage(args.input)
-    converter = ZbornikConverter(package)
+
+    # Ensure we fail cleanly if Pandoc isn't available (MathConverter checks too)
+    if not shutil.which("pandoc"):
+        sys.stderr.write("Error: Pandoc is required for math conversion but was not found on PATH.\n")
+        return 3
+
+    try:
+        converter = ZbornikConverter(package)
+    except RuntimeError as e:
+        sys.stderr.write(str(e) + "\n")
+        return 3
+
     label = args.label or f"doc:{slugify(args.input.stem)}"
     output = converter.convert(label=label)
 
