@@ -453,19 +453,19 @@
 
 %%%%%%%%%%%%%% figures
 
-\newcommand{\Figure}[4]{
-    \begin{figure}
+\newcommand{\Figure}[4][htbp]{%
+    \begin{figure}[#1]
         \centering
-        \includegraphics[width=\linewidth]{#1}
-        \bicaption{#2}{#3}
+        \includegraphics[width=\linewidth]{#2}
+        \bicaption{#3}{#4}
     \end{figure}
 }
 
-\newcommand{\FigureDouble}[4]{
-    \begin{figure*}
+\newcommand{\FigureDouble}[4][htbp]{%
+    \begin{figure*}[#1]
         \centering
-        \includegraphics[width=\linewidth]{#1}
-        \bicaption{#2}{#3}
+        \includegraphics[width=\linewidth]{#2}
+        \bicaption{#3}{#4}
     \end{figure*}
 }
 

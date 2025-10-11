@@ -38,5 +38,6 @@ RUN echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula sele
     mv algpseudocodex.sty ~/texmf/tex/latex/algpseudocodex/ && \
     texhash ~/texmf
 
+RUN apt-get update && apt-get install -y pandoc && rm -rf /var/lib/apt/lists/*
 
 CMD ["bash"]
