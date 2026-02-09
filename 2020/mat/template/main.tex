@@ -1,0 +1,84 @@
+
+\Author{Dimitrije Glukčević, Đorđe Stevanović}
+\Title{Kako koristiti ovaj templejt za pisanje radova za zbornik?}
+\TitleEng{How to use this template?}
+\begin{Abstract}
+Ovaj dokument predstavlja uputstvo za korišćenje ovog templejta i ujedno i objašnjenje rada konvertera za pretvaranje word dokumenata u tex fajl odgovarajući za zbornik.
+\end{Abstract}
+\begin{AuthorEx}
+Dimitrije Glukčević, Prirodno Matematički Fakultet, Nis \ Mentor: Đorđe Stevanović, Fakulteta za Računalništvo in Informatiko, Univerza v Ljubljani, Slovenija
+\end{AuthorEx}
+\begin{AbstractEng}
+This is an example of the english abstract and english title.
+\end{AbstractEng}
+\StartDoublePaper
+\label{doc:rad}
+
+\AuthorExHere
+\section{Uvod}
+Pretvaranje word dokumenata u tex nije trivijala zadatak, presvega zbog drugačijih filozofija ta dva formata. Naše rešenje koristi word stilove za određivanje ključnih delova teksta (naslov, apstrakt, literatura itd.) i koristi „headless“ libreoffice za ekstrakciju slika. Tabele su takođe uključene u konverziju ali samo „proste“, bez spojenih vertikalnih polja. Ako su vam neophodne kompleksne tabele, najjednostavnije je da ih učitate kao sliku. Konverter traži opise slika i tabela u paragrafima pre i posle slike/tabele, tako da je bitno da ih upišete kao običan tekst, a ne kao „text box“.
+Stilovi za koji su neophodni za korektnu konverziju (Svi delovi su već u odgovarajućim stilovima, lista je samo za referencu):
+\begin{itemize}
+\item Ime i prezime autora, pre naslova, imena odvojena zarezom: „Ime i prezime“ stil.
+\item Naslov rada: „Naslov“ stil.
+\item Engleski naslov rada: „TitleEng“ stil.
+\item Apstrakt rada: „Apstrakt“ stil.
+\item Engleski apstrakt rada: „AbstractEng“ stil.
+\item Detalji o autorstvu i mentorstvu, koji se obično nalaze na kraju leve kolone prve strane: „Autorstvo“ stil.
+\item Normalan tekst neka ostane u „Normal“ stilu, naslovi unutrar teksta mogu da budu u stilu „Heading 2“, „Heading 3“, „Heading 4“ itd.
+\end{itemize}
+\section{Slike}
+Sve stilove možete da nađete u traci alata na ``Home'' strani ili desnim klikom na tekst, pod opcijom „Styles“. Slike ispod ilustruju te opcije.
+\Figure{image1.png}{Opcije stilova u ``Home'' traci.}{Style options from ``Home'' ribbon.}
+\Figure{image2.png}{Opcije za stilove u menui desnog klika.}{Style options from right-click menu.}
+Gore su prikazana dva primera unošenja slika. Slike prati njihov opcis kao običan tekst a ne kao textbox! Slike mogu da budu pozicionirane u bilokom delu kolone, ali će konvertovanom dokumentu zauzeti mesto posle kraja trenutnog pasusa.
+Konverter automatski prepoznaje da li je slika previše velika za jednu kolonu i razširuje je u dve kolone, pozicionirana na prvom mestu smislenom za xelatex, može biti na sledećoj strani. Sledi primer.
+\FigureDouble{image3.jpeg}{Slika Petnice iz ptičije petspektive.}{Photo of Petnica from bird-eye perspective.}
+\section{Tabele}
+Tabele poštuju ista pravila za opise kao i slike, traže ih po paragrafima običnog teksta pre i posle tabele. Slede primeri tabela, takođe imaju automatsko procenjivanje da li je tabela dovoljno mala za jednu kolonu ili treba da bude raširena na dve. Slede primeri tabela.
+\Table{%
+    \begin{tabular}{|c|c|c|}
+    \hline
+     Prvi sabirak & Drugi sabirak & Zbir \\
+    \hline
+     2 & 3 & 5 \\
+    \hline
+     10 & 13 & 23 \\
+    \hline
+    \end{tabular}
+}{Primer tabele sabiranja.}{An example table for summation.}{}
+Ako imate potrebe za nekom jako kompleksnom tabelom (ili tabelom specifičnog stila), najbolje je da to unesete kao sliku. Slike se konvertuju bez gubitka informacija dok se tabele konvertuju sa potencijalnim gubitkom izgleda.
+\TableDouble{%
+    \begin{tabular}{|c|c|c|c|c|c|c|c|c|c|}
+    \hline
+     Sab.1 & Sab.1 & Sab.1 & Sab.1 & Sab.1 & Sab.1 & Sab.1 & Sab.1 & Sab.1 & Zbir \\
+    \hline
+     1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 1 & 9 \\
+    \hline
+     123 & 123 & 123 & 123 & 123 & 123 & 123 & 123 & 123 & 1107 \\
+    \hline
+    \end{tabular}
+}{Primer jako velike tabele koja staje u dve kolone.}{An example of a wide table that takes up 2 columns.}{}
+\section{Jednačine}
+Konverter ume da prebacuje jednačine i simbole iz word opcija u tex komande, to radi biblioteka pandoc tako da neulazimo u detalje rada. Evo nekoliko (π) primera.
+\begin{equation}
+e\sqrt[3]{x} = \ \sum_{}^{}{ex^{k}}
+\end{equation}
+\begin{equation}
+\int_{- \infty}^{\infty}{e^{- i\omega t}\text{dt}}
+\end{equation}
+\section{Zaključak}
+Sve bi ovo bilo nepotrebno da svi seminari uče LaTeX, ali avaj. Srećno pisanje radova!
+
+\section{Literatura}
+\Source{
+    VanderPlas J. T., 2018. Understanding the Lomb–Scargle Periodogram. The Astrophysical Journal Supplement Series, 236(1): 16.
+}
+\Source{
+    Vukićvić-Karabin M., Atanacković O. 2010. Opšta astrofizika. Beograd: Zavod za udbenike
+}
+\Source{
+    Wils P., Van Cauteren P., Lampens P., 2003. NSV 25610: A High-Amplitude delta Scuti Star. Information Bulletin on Variable Stars, 5475.
+}
+
+\EndPaper
